@@ -1,143 +1,166 @@
 # Chart QA Pipeline
 
-Hỏi đáp thông minh về biểu đồ sử dụng:
-**YOLO** (phân loại) → **PaddleOCR-VL** (extract data) → **Vintern** (QA)
-
----
-
-## Cấu trúc project
+Hệ thống hỏi đáp thông minh về biểu đồ sử dụng 3 model AI:
 
 ```
-chart_qa/
-├── main.py               # FastAPI app
-├── pipeline.py           # Pipeline orchestrator
-├── config.py             # Cấu hình (paths, device, params)
-├── requirements.txt
-├── .env                  # (tuỳ chọn) override config
-├── models/
-│   ├── chart_classifier.py   # YOLO classifier
-│   ├── data_extractor.py     # PaddleOCR-VL extractor
-│   └── chart_qa.py           # Vintern QA
-├── static/
-│   └── index.html        # Web UI
-└── uploads/              # Ảnh được upload (tự tạo)
+Ảnh biểu đồ + Câu hỏi
+        ↓
+   YOLO (phân loại chart type)
+        ↓
+   PaddleOCR-VL (extract data từ chart)
+        ↓
+   Vintern-1B (trả lời câu hỏi)
+        ↓
+      Kết quả
 ```
 
 ---
 
-## Cài đặt
+## Cấu trúc thư mục
 
-### 1. Tạo virtual environment
-
-```bash
-python -m venv venv
-source venv/bin/activate   # Linux/Mac
-# hoặc
-venv\Scripts\activate      # Windows
 ```
-
-### 2. Cài PyTorch (theo CUDA version)
-
-```bash
-# CUDA 12.1 (Kaggle / phần lớn RTX)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# CUDA 11.8
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-
-# CPU only
-pip install torch torchvision
-```
-
-### 3. Cài transformers đúng version
-
-> ⚠️ **Xung đột version**: PaddleOCR-VL cần `transformers>=4.45`, Vintern cần `transformers==4.44.x`.
-> Giải pháp đơn giản nhất: cài `transformers>=4.45` và thêm `low_cpu_mem_usage=True` cho Vintern (đã xử lý trong code).
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. (Tuỳ chọn) Cài PaddlePaddle nếu dùng PaddleOCR native
-
-```bash
-pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-pip install -U "paddleocr[doc-parser]"
+D:\Pipeline_CHartqa\
+├── paddle_server.py          # Server riêng cho PaddleOCR-VL (port 8001)
+├── venv_paddle\              # Virtual env riêng cho Paddle (transformers>=4.45)
+│
+└── files\
+    ├── main.py               # FastAPI app chính (port 8000)
+    ├── pipeline.py           # Orchestrator điều phối 3 bước
+    ├── config.py             # Cấu hình paths, device, params
+    ├── chart_classifier.py   # YOLO classifier
+    ├── data_extractor.py     # HTTP client gọi paddle_server:8001
+    ├── chart_qa.py           # Vintern QA engine
+    ├── index.html            # Web UI
+    ├── requirements.txt
+    ├── Yolo_other\
+    │   └── best.pt           # YOLO weights
+    ├── models_local\
+    │   ├── vintern\          # Vintern-1B-v3.5 weights
+    │   └── paddleocr_vl\     # PaddleOCR-VL weights
+    └── venv\                 # Virtual env chính (transformers==4.44.2)
 ```
 
 ---
 
-## Cấu hình
+## Lý do dùng 2 virtual environment
 
-Chỉnh `config.py` hoặc tạo file `.env`:
+PaddleOCR-VL và Vintern yêu cầu **2 version transformers xung đột nhau**:
 
-```env
-# Đường dẫn YOLO model weights của bạn
-YOLO_MODEL_PATH=yolo_chart.pt
-
-# HuggingFace ID hoặc local path
-PADDLE_MODEL_PATH=PaddlePaddle/PaddleOCR-VL
-VINTERN_MODEL_PATH=5CD-AI/Vintern-1B-v3_5
-
-# cuda hoặc cpu
-DEVICE=cuda
-
-# Tham số generation
-VINTERN_MAX_NEW_TOKENS=1024
-PADDLE_MAX_NEW_TOKENS=512
-```
-
-### YOLO model
-
-- Nếu **đã có** file `.pt`: set `YOLO_MODEL_PATH=path/to/your_model.pt`
-- Nếu **chưa có**: pipeline vẫn chạy, chart_type sẽ trả về `"unknown"` và Vintern vẫn QA bình thường
+| | venv (Main) | venv_paddle (Paddle) |
+|---|---|---|
+| transformers | `==4.44.2` | `>=4.45` |
+| Chứa | Vintern + FastAPI chính | PaddleOCR-VL + FastAPI mini |
+| Port | 8000 | 8001 |
 
 ---
 
-## Chạy
+## Cài đặt lần đầu
 
-```bash
-cd chart_qa
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+### 1. Tải model về local
+
+```powershell
+cd D:\Pipeline_CHartqa\files
+
+# Vintern
+python -c "from huggingface_hub import snapshot_download; snapshot_download('5CD-AI/Vintern-1B-v3_5', local_dir='./models_local/vintern')"
+
+# PaddleOCR-VL
+python -c "from huggingface_hub import snapshot_download; snapshot_download('PaddlePaddle/PaddleOCR-VL', local_dir='./models_local/paddleocr_vl')"
 ```
 
-#Venv paddle
+### 2. Tạo venv_paddle
+
+```powershell
 cd D:\Pipeline_CHartqa
+
+python -m venv venv_paddle
 venv_paddle\Scripts\activate
+
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 python -m pip install "transformers>=4.45" accelerate pillow fastapi uvicorn python-multipart httpx
-python -m uvicorn paddle_server:app --port 8001
-Sau đó mở browser: **http://localhost:8000**
-#main cụ
+```
+
+### 3. Cài dependencies cho venv chính
+
+```powershell
 cd D:\Pipeline_CHartqa\files
 venv\Scripts\activate
-python -m pip install "transformers==4.44.2" --force-reinstall
-python -m pip install httpx
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+python -m pip install "transformers==4.44.2" accelerate pillow fastapi uvicorn python-multipart httpx ultralytics timm pydantic-settings
+```
+
 ---
 
-## API
+## Chạy hệ thống
+
+Mỗi lần chạy cần **2 terminal**:
+
+### Terminal 1 — Paddle Server
+
+```powershell
+cd D:\Pipeline_CHartqa
+venv_paddle\Scripts\activate
+python -m uvicorn paddle_server:app --port 8001
+```
+
+Chờ thấy:
+```
+✅ PaddleOCR-VL ready on cuda
+```
+
+### Terminal 2 — Main App
+
+```powershell
+cd D:\Pipeline_CHartqa\files
+venv\Scripts\activate
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Chờ thấy:
+```
+✅ Pipeline ready in ~39s
+🟢 All models loaded. API ready.
+```
+
+### Mở Web UI
+
+Truy cập: **http://localhost:8000**
+
+---
+
+## Sử dụng
+
+1. Mở **http://localhost:8000**
+2. Upload ảnh biểu đồ (PNG, JPG, WEBP — tối đa 10MB)
+3. Nhập câu hỏi (tiếng Việt hoặc tiếng Anh)
+4. Nhấn **Phân tích & Trả lời**
+5. Xem kết quả gồm: chart type, extracted data, câu trả lời, latency
+
+---
+
+## API Endpoint
 
 ### `POST /api/ask`
 
-**Form data:**
-| Field    | Type | Mô tả |
-|----------|------|--------|
-| `image`  | file | Ảnh biểu đồ (PNG/JPG/WEBP, max 10MB) |
-| `question` | string | Câu hỏi về biểu đồ |
+```bash
+curl -X POST http://localhost:8000/api/ask \
+  -F "image=@chart.png" \
+  -F "question=Công ty nào có doanh thu cao nhất?"
+```
 
-**Response:**
+Response:
 ```json
 {
   "question": "Công ty nào có doanh thu cao nhất?",
-  "answer": "FPT có doanh thu cao nhất với 80 triệu đồng.",
-  "chart_type": "bar_chart",
-  "extracted_data": "| Công ty | Doanh thu |\n|---------|----------|\n| FPT | 80 |...",
+  "answer": "FPT có doanh thu cao nhất.",
+  "chart_type": "h_bar",
+  "extracted_data": "...",
   "latency": {
-    "classify": 0.12,
-    "extract": 3.45,
-    "qa": 2.87,
-    "total": 6.44
+    "classify": 6.24,
+    "extract": 45.2,
+    "qa": 30.1,
+    "total": 81.5
   }
 }
 ```
@@ -146,14 +169,31 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 Kiểm tra trạng thái models.
 
-### `GET /`
+### `GET /docs`
 
-Web UI.
+Swagger UI để test API trực tiếp trên browser.
 
 ---
 
-## Notes
+## Cấu hình
 
-- **GPU T4 (Kaggle)**: set `DEVICE=cuda`, dùng `float16` cho Paddle, `bfloat16` cho Vintern
-- **RAM**: Cả 3 model cần ~10-12GB VRAM tổng
-- **Vintern transformers conflict**: code đã dùng `low_cpu_mem_usage=True` để tương thích `transformers>=4.45`
+Chỉnh trong `config.py`:
+
+```python
+YOLO_MODEL_PATH   = "Yolo_other/best.pt"
+PADDLE_MODEL_PATH = "./models_local/paddleocr_vl"
+VINTERN_MODEL_PATH = "./models_local/vintern"
+DEVICE = "cuda"
+VINTERN_MAX_NEW_TOKENS = 1024
+PADDLE_MAX_NEW_TOKENS  = 512
+```
+
+---
+
+## Lưu ý
+
+- **GPU cần thiết**: Cả 2 model đều chạy trên CUDA, không có GPU sẽ rất chậm
+- **VRAM**: Cần khoảng 8-12GB VRAM tổng cho cả Paddle + Vintern
+- **Thời gian xử lý**: Mỗi request mất khoảng 1-3 phút tùy độ phức tạp của biểu đồ
+- **Paddle timeout**: Nếu bị timeout, tăng giá trị `timeout=300.0` trong `data_extractor.py`
+- **Web UI**: File `index.html` phải nằm cùng cấp với `main.py` hoặc trong thư mục `static/`
