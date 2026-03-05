@@ -89,7 +89,7 @@ class ChartQA:
 
     def _load_model(self, model_path: str):
         try:
-            logger.info(f"⏳ Loading Vintern from {model_path} ...")
+            logger.info(f" Loading Vintern from {model_path} ...")
 
             # Giống hệt notebook Kaggle: low_cpu_mem_usage=True + .cuda() ngay lập tức
             self.model = AutoModel.from_pretrained(
@@ -103,9 +103,9 @@ class ChartQA:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_path, trust_remote_code=True, use_fast=False
             )
-            logger.info("✅ Vintern loaded successfully")
+            logger.info(" Vintern loaded successfully")
         except Exception as e:
-            logger.error(f"❌ Failed to load Vintern: {e}")
+            logger.error(f" Failed to load Vintern: {e}")
             raise
 
     def answer(self, image: Image.Image, question: str,
