@@ -10,9 +10,14 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 
 app = FastAPI()
 
-MODEL_PATH = "./models_local/paddleocr_vl"
+import sys
+sys.path.append("./files")  # path tới thư mục chứa config.py
+from config import Settings
 
-print("⏳ Loading PaddleOCR-VL...")
+settings = Settings()
+MODEL_PATH = settings.PADDLE_MODEL_PATH
+print(f" Loading from: {MODEL_PATH}")
+print(" Loading PaddleOCR-VL...")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = AutoModelForImageTextToText.from_pretrained(
@@ -21,7 +26,7 @@ model = AutoModelForImageTextToText.from_pretrained(
 ).to(device).eval()
 
 processor = AutoProcessor.from_pretrained(MODEL_PATH)
-print(f"✅ PaddleOCR-VL ready on {device}")
+print(f" PaddleOCR-VL ready on {device}")
 
 
 @app.get("/health")
@@ -57,4 +62,5 @@ async def extract(image: UploadFile = File(...)):
         outputs[0][inputs["input_ids"].shape[-1]:-1],
         skip_special_tokens=True
     )
+    print(f"Extracted: {result}") 
     return {"extracted_data": result.strip()}
