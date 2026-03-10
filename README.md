@@ -5,7 +5,7 @@ Hệ thống hỏi đáp thông minh về biểu đồ sử dụng 3 model AI:
 ```
 Ảnh biểu đồ + Câu hỏi
         ↓
-   YOLO (phân loại chart type)
+   ResNet18(Classify chart)
         ↓
    PaddleOCR-VL (extract data từ chart)
         ↓
@@ -32,11 +32,10 @@ D:\Pipeline_CHartqa\
     ├── chart_qa.py           # Vintern QA engine
     ├── index.html            # Web UI
     ├── requirements.txt
-    ├── Yolo_other\
-    │   └── best.pt           # YOLO weights
     ├── models_local\
     │   ├── vintern\          # Vintern-1B-v3.5 weights
     │   └── paddleocr_vl\     # PaddleOCR-VL weights
+        └──resnet18
     └── venv\                 # Virtual env chính (transformers==4.44.2)
 ```
 
