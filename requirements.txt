@@ -26,8 +26,6 @@ ultralytics>=8.2.0
 pillow>=10.0.0
 sentencepiece
 tiktoken
-wheel
-flash_attn
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0

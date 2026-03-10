@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     PADDLE_MODEL_PATH: str = "./models_local/paddleocr_vl"
 
     # Vintern: HuggingFace model ID hoặc local path
-    VINTERN_MODEL_PATH: str = "./models_local/vintern"
+    VINTERN_MODEL_PATH: str = "./models_local/vintern_finetuned" 
 
     # ── Hardware ─────────────────────────────────────────────────────────────
     DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"

@@ -97,7 +97,7 @@ class ChartQA:
                 torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
                 trust_remote_code=True,
-                use_flash_attn=False,
+
             ).eval().cuda()
 
             self.tokenizer = AutoTokenizer.from_pretrained(
