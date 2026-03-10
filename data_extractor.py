@@ -16,7 +16,7 @@ PADDLE_SERVER_URL = "http://localhost:8001/extract"
 class ChartDataExtractor:
     def __init__(self, model_path: str = None, device: str = "cuda"):
         # model_path và device không dùng nữa, giữ lại để không phá interface
-        logger.info(f"✅ ChartDataExtractor ready (HTTP → {PADDLE_SERVER_URL})")
+        logger.info(f" ChartDataExtractor ready (HTTP → {PADDLE_SERVER_URL})")
 
     def extract(self, image: Image.Image, max_new_tokens: int = 512) -> str:
         try:
@@ -27,7 +27,7 @@ class ChartDataExtractor:
             response = httpx.post(
                 PADDLE_SERVER_URL,
                 files={"image": ("chart.png", buf, "image/png")},
-                timeout=300.0,
+                timeout=600.0,
             )
             response.raise_for_status()
             result = response.json().get("extracted_data", "")
@@ -35,7 +35,7 @@ class ChartDataExtractor:
             return result
 
         except httpx.ConnectError:
-            logger.error("❌ Không kết nối được paddle_server tại port 8001. Hãy chạy paddle_server trước!")
+            logger.error(" Không kết nối được paddle_server tại port 8001. Hãy chạy paddle_server trước!")
             return "[Paddle server chưa chạy]"
         except Exception as e:
             logger.error(f"Extraction error: {e}")

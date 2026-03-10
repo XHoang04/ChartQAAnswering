@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # ── Model paths ──────────────────────────────────────────────────────────
     # YOLO: trỏ tới file .pt của bạn, hoặc để mặc định (sẽ fallback "unknown")
-    YOLO_MODEL_PATH: str = r"D:\Pipeline_CHartqa\files\Yolo_other\best.pt"
+    RESNET_MODEL_PATH: str = "./models_local/resnet18/resnet18_chart_classifier.pt"
 
     # PaddleOCR-VL: HuggingFace model ID hoặc local path
     PADDLE_MODEL_PATH: str = "./models_local/paddleocr_vl"

@@ -41,18 +41,18 @@ pipeline: ChartQAPipeline = None
 async def lifespan(app: FastAPI):
     """Load pipeline on startup, cleanup on shutdown."""
     global pipeline
-    logger.info("⏳ Loading models, please wait...")
+    logger.info(" Loading models, please wait...")
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     pipeline = ChartQAPipeline()
-    logger.info("🟢 All models loaded. API ready.")
+    logger.info(" All models loaded. API ready.")
     yield
-    logger.info("🔴 Shutting down.")
+    logger.info(" Shutting down.")
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Chart QA API",
-    description="Chart Question Answering: YOLO → PaddleOCR-VL → Vintern",
+    description="Chart Question Answering: YOLO -> PaddleOCR-VL -> Vintern",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -136,6 +136,7 @@ async def ask(
             "chart_type": result.chart_type,
             "extracted_data": result.extracted_data,
             "latency": result.latency,
+            "supported": result.supported,
         }
     )
 
