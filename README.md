@@ -27,13 +27,13 @@ D:\Pipeline_CHartqa\
     ├── main.py               # FastAPI app chính (port 8000)
     ├── pipeline.py           # Orchestrator điều phối 3 bước
     ├── config.py             # Cấu hình paths, device, params
-    ├── chart_classifier.py   # YOLO classifier
+    ├── chart_classifier.py   #  classifier
     ├── data_extractor.py     # HTTP client gọi paddle_server:8001
     ├── chart_qa.py           # Vintern QA engine
     ├── index.html            # Web UI
     ├── requirements.txt
     ├── models_local\
-    │   ├── vintern\          # Vintern-1B-v3.5 weights
+    │   ├── vintern\          # Vintern-1B-v2 weights
     │   └── paddleocr_vl\     # PaddleOCR-VL weights
         └──resnet18
     └── venv\                 # Virtual env chính (transformers==4.44.2)
