@@ -135,6 +135,20 @@
     background: #000;
   }
 
+  .pdf-preview {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px;
+    background: var(--surface2);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+
+  .pdf-preview .pdf-icon { font-size: 2rem; }
+  .pdf-preview .pdf-name { color: var(--accent2); word-break: break-all; }
+
   #remove-btn {
     position: absolute;
     top: 8px; right: 8px;
@@ -262,6 +276,7 @@
     font-size: 0.9rem;
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 
@@ -283,8 +298,8 @@
     <div id="dropzone">
       <div class="drop-icon"></div>
       <p>Kéo thả ảnh vào đây hoặc <span id="browse-link">chọn file</span></p>
-      <p style="font-size:0.78rem;margin-top:6px">PNG, JPG, WEBP — tối đa 10MB</p>
-      <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" />
+      <p style="font-size:0.78rem;margin-top:6px">PNG, JPG, WEBP, PDF — tối đa 10MB</p>
+      <input type="file" id="fileInput" accept="image/*,application/pdf">
     </div>
     <div id="preview-wrap">
       <img id="preview-img" src="" alt="preview" />
@@ -295,12 +310,21 @@
   <!-- Question card -->
   <div class="card">
     <h2>2. Nhập câu hỏi</h2>
-    <textarea id="question" placeholder="VD: Công ty nào có doanh thu cao nhất năm 2023? / Which category has the highest value?"></textarea>
+    <textarea id="question" placeholder="VD: Công ty nào có doanh thu cao nhất năm 2023? "></textarea>
   </div>
 
   <!-- Submit -->
   <button id="submit-btn" disabled> Phân tích & Trả lời</button>
   <div class="loading-bar" id="loading-bar"></div>
+
+  <!-- Chart type preview (hiện ngay sau classify) -->
+  <div id="chart-type-bar" style="display:none;" class="card" style="padding:12px 24px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="color:var(--muted);font-size:0.85rem;">Loại biểu đồ nhận dạng:</span>
+      <span id="chart-type-live" style="color:var(--accent2);font-weight:700;font-size:1rem;"></span>
+      <span id="chart-type-status" style="font-size:0.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
 
   <!-- Result -->
   <div class="card" id="result-card">
@@ -331,14 +355,41 @@ function updateSubmitState() {
 
 function showPreview(file) {
   selectedFile = file;
-  const url = URL.createObjectURL(file);
-  previewImg.src = url;
+  previewWrap.innerHTML = '<button id="remove-btn" title="Xóa ảnh">✕</button>';
+  if (file.type === 'application/pdf') {
+    previewWrap.innerHTML += `<canvas id="pdf-canvas" style="width:100%;border-radius:8px;background:#000;"></canvas>`;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdf = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+      const page = await pdf.getPage(1);
+      const canvas = document.getElementById('pdf-canvas');
+      const ctx = canvas.getContext('2d');
+      const viewport = page.getViewport({ scale: 1.5 });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const url = URL.createObjectURL(file);
+    previewWrap.innerHTML += `<img id="preview-img" src="${url}" alt="preview" style="width:100%;max-height:340px;object-fit:contain;border-radius:8px;background:#000;" />`;
+  }
+  document.getElementById('remove-btn').addEventListener('click', () => {
+    selectedFile = null;
+    fileInput.value = '';
+    previewWrap.style.display = 'none';
+    previewWrap.innerHTML = '';
+    dropzone.style.display = 'flex';
+    document.getElementById('chart-type-bar').style.display = 'none';
+    updateSubmitState();
+  });
   dropzone.style.display = 'none';
   previewWrap.style.display = 'block';
   updateSubmitState();
 }
 
-browseLink.addEventListener('click', () => fileInput.click());
+browseLink.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
 dropzone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => { if (e.target.files[0]) showPreview(e.target.files[0]); });
 
@@ -348,17 +399,10 @@ dropzone.addEventListener('drop', e => {
   e.preventDefault();
   dropzone.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) showPreview(file);
+  if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) showPreview(file);
 });
 
-removeBtn.addEventListener('click', () => {
-  selectedFile = null;
-  fileInput.value = '';
-  previewImg.src = '';
-  previewWrap.style.display = 'none';
-  dropzone.style.display = 'flex';
-  updateSubmitState();
-});
+// remove btn handled dynamically in showPreview
 
 questionEl.addEventListener('input', updateSubmitState);
 
@@ -379,27 +423,42 @@ submitBtn.addEventListener('click', async () => {
 
     if (!res.ok) {
       resultContent.innerHTML = `<div class="error-box">❌ ${data.detail || 'Đã có lỗi xảy ra.'}</div>`;
+      resultCard.style.display = 'block';
     } else {
+      // Hiện chart type ngay
+      const chartTypeBar = document.getElementById('chart-type-bar');
+      const chartTypeLive = document.getElementById('chart-type-live');
+      const chartTypeStatus = document.getElementById('chart-type-status');
+      chartTypeLive.textContent = data.chart_type.toUpperCase();
+      if (!data.supported) {
+        chartTypeLive.style.color = 'var(--error)';
+        chartTypeStatus.textContent = '⚠️ Không hỗ trợ';
+      } else {
+        chartTypeLive.style.color = 'var(--accent2)';
+        chartTypeStatus.textContent = '✓ Hỗ trợ';
+      }
+      chartTypeBar.style.display = 'block';
+
       const latency = data.latency || {};
+      const answerStyle = !data.supported ? 'border-left-color:var(--error);color:var(--error)' : '';
       resultContent.innerHTML = `
         <div class="result-meta">
-          <div class="meta-chip"><label>Loại biểu đồ:</label><span>${data.chart_type}</span></div>
           <div class="meta-chip"><label>Classify:</label><span>${latency.classify ?? '?'}s</span></div>
-          <div class="meta-chip"><label>Extract:</label><span>${latency.extract ?? '?'}s</span></div>
-          <div class="meta-chip"><label>QA:</label><span>${latency.qa ?? '?'}s</span></div>
+          ${latency.extract ? `<div class="meta-chip"><label>Extract:</label><span>${latency.extract}s</span></div>` : ''}
+          ${latency.qa ? `<div class="meta-chip"><label>QA:</label><span>${latency.qa}s</span></div>` : ''}
           <div class="meta-chip"><label>Total:</label><span>${latency.total ?? '?'}s</span></div>
         </div>
-        <div class="answer-box">${escapeHtml(data.answer)}</div>
+        <div class="answer-box" style="${answerStyle}">${escapeHtml(data.answer)}</div>
         ${data.extracted_data ? `
         <details>
-          <summary>📋 Xem dữ liệu trích xuất từ PaddleOCR-VL</summary>
+          <summary>📊 Xem dữ liệu trích xuất từ PaddleOCR-VL</summary>
           <div class="extracted-box">${escapeHtml(data.extracted_data)}</div>
         </details>` : ''}
       `;
+      resultCard.style.display = 'block';
     }
-    resultCard.style.display = 'block';
   } catch (err) {
-    resultContent.innerHTML = `<div class="error-box">❌ Lỗi kết nối: ${err.message}</div>`;
+    resultContent.innerHTML = `<div class="error-box">🔌 Lỗi kết nối: ${err.message}</div>`;
     resultCard.style.display = 'block';
   } finally {
     submitBtn.disabled = false;

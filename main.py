@@ -95,11 +95,11 @@ async def ask(
         raise HTTPException(status_code=503, detail="Pipeline chưa sẵn sàng, thử lại sau.")
 
     # Validate file type
-    allowed_types = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+    allowed_types = {"image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"}
     if image.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail=f"Chỉ chấp nhận ảnh JPEG/PNG/WEBP, nhận được: {image.content_type}",
+            detail=f"Chỉ chấp nhận ảnh JPEG/PNG/WEBP hoặc PDF, nhận được: {image.content_type}",
         )
 
     # Validate file size
@@ -108,14 +108,29 @@ async def ask(
     if size_mb > settings.MAX_IMAGE_SIZE_MB:
         raise HTTPException(
             status_code=400,
-            detail=f"Ảnh quá lớn ({size_mb:.1f}MB), tối đa {settings.MAX_IMAGE_SIZE_MB}MB",
+            detail=f"File quá lớn ({size_mb:.1f}MB), tối đa {settings.MAX_IMAGE_SIZE_MB}MB",
         )
 
     # Load image
     try:
-        pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
+        if image.content_type == "application/pdf":
+            try:
+                import fitz
+            except ImportError:
+                raise HTTPException(status_code=500, detail="Cần cài pymupdf: pip install pymupdf")
+            doc = fitz.open(stream=io.BytesIO(contents), filetype="pdf")
+            if len(doc) == 0:
+                raise HTTPException(status_code=400, detail="PDF không có trang nào.")
+            page = doc[0]
+            pix = page.get_pixmap(dpi=150)
+            pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            logger.info(f"PDF converted to image size: {pil_image.size}")
+        else:
+            pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Không thể đọc ảnh: {e}")
+        raise HTTPException(status_code=400, detail=f"Không thể đọc file: {e}")
 
     # Save upload (optional, for logging)
     upload_name = f"{uuid.uuid4().hex}_{image.filename}"

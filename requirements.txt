@@ -15,7 +15,7 @@ torchvision>=0.16.0
 transformers>=4.45.0
 accelerate>=0.27.0
 
-# Vintern: dùng transformers==4.44.x (xung đột với paddle nếu dùng chung env)
+# Vintern: dùng transformers==4.44.x (xung đột với paddle nếu dùng Chung env)
 # → Khuyến nghị dùng 2 virtual env riêng hoặc deploy bằng model server (TorchServe/Triton)
 # transformers==4.44.2  # uncomment nếu chỉ chạy Vintern
 
@@ -26,6 +26,7 @@ ultralytics>=8.2.0
 pillow>=10.0.0
 sentencepiece
 tiktoken
+pymupdf
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0
