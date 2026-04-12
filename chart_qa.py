@@ -1,6 +1,6 @@
 """
-Module: Chart QA using Vintern-1B-v3.5
-transformers==4.44.x
+Module: Chart QA using Vintern-1B
+transformers==4.44.x — hỗ trợ multi-turn chat với history
 """
 import logging
 import torch
@@ -89,33 +89,26 @@ class ChartQA:
 
     def _load_model(self, model_path: str):
         try:
-            logger.info(f" Loading Vintern from {model_path} ...")
-
-            # Giống hệt notebook Kaggle: low_cpu_mem_usage=True + .cuda() ngay lập tức
+            logger.info(f"Loading Vintern from {model_path} ...")
             self.model = AutoModel.from_pretrained(
                 model_path,
                 torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
                 trust_remote_code=True,
-
             ).eval().cuda()
 
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_path, trust_remote_code=True, use_fast=False
             )
-            logger.info(" Vintern loaded successfully")
+            logger.info("Vintern loaded successfully")
         except Exception as e:
-            logger.error(f" Failed to load Vintern: {e}")
+            logger.error(f"Failed to load Vintern: {e}")
             raise
 
-    def answer(self, image: Image.Image, question: str,
-               chart_type: str = "unknown", extracted_data: str = "",
-               max_new_tokens: int = 1024) -> str:
-        if self.model is None:
-            return "Model chưa được load."
-        try:
-            pixel_values = preprocess_image(image, max_num=6).to(torch.bfloat16).cuda()
-
+    def _build_prompt(self, question: str, chart_type: str, extracted_data: str,
+                      is_first_turn: bool) -> str:
+        """Build prompt — chỉ thêm context ở lượt đầu tiên"""
+        if is_first_turn:
             context_parts = []
             if chart_type and chart_type != "unknown":
                 context_parts.append(f"Loại biểu đồ: {chart_type}")
@@ -124,13 +117,43 @@ class ChartQA:
             context_str = "\n".join(context_parts)
 
             if context_str:
-                prompt = (
+                return (
                     f"<image>\n{context_str}\n\n"
                     f"Câu hỏi: {question}\n"
-                    f"Hãy trả lời câu hỏi dựa trên biểu đồ và dữ liệu trích xuất ở trên."
+                    f"Hãy trả lời dựa trên biểu đồ và dữ liệu trích xuất."
                 )
             else:
-                prompt = f"<image>\nCâu hỏi: {question}"
+                return f"<image>\nCâu hỏi: {question}"
+        else:
+            # Các lượt sau không cần <image> và context nữa
+            return question
+
+    def answer_with_history(
+        self,
+        image: Image.Image,
+        question: str,
+        chart_type: str = "unknown",
+        extracted_data: str = "",
+        history: list = None,
+        max_new_tokens: int = 512,
+    ) -> tuple[str, list]:
+        """
+        Multi-turn chat với history.
+        Returns: (answer, updated_history)
+        """
+        if self.model is None:
+            return "Model chưa được load.", history or []
+
+        try:
+            is_first_turn = not history
+
+            # Chỉ encode ảnh ở lượt đầu
+            if is_first_turn:
+                pixel_values = preprocess_image(image, max_num=6).to(torch.bfloat16).cuda()
+            else:
+                pixel_values = None
+
+            prompt = self._build_prompt(question, chart_type, extracted_data, is_first_turn)
 
             generation_config = dict(
                 max_new_tokens=max_new_tokens,
@@ -139,12 +162,27 @@ class ChartQA:
                 repetition_penalty=2.5,
             )
 
-            response, _ = self.model.chat(
-                self.tokenizer, pixel_values, prompt,
-                generation_config, history=None, return_history=True,
+            response, new_history = self.model.chat(
+                self.tokenizer,
+                pixel_values,
+                prompt,
+                generation_config,
+                history=history or None,
+                return_history=True,
             )
-            return response.strip()
+            return response.strip(), new_history
 
         except Exception as e:
             logger.error(f"Vintern inference error: {e}")
-            return f"[QA error: {e}]"
+            return f"[Lỗi: {e}]", history or []
+
+    def answer(self, image: Image.Image, question: str,
+               chart_type: str = "unknown", extracted_data: str = "",
+               max_new_tokens: int = 512) -> str:
+        """Backward compat — single turn"""
+        response, _ = self.answer_with_history(
+            image=image, question=question,
+            chart_type=chart_type, extracted_data=extracted_data,
+            history=None, max_new_tokens=max_new_tokens,
+        )
+        return response

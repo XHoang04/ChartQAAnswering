@@ -1,9 +1,12 @@
 """
-FastAPI App: Chart Question Answering
+FastAPI App: Chart Question Answering — Chat mode
 Endpoints:
-  POST /api/ask  - Upload ảnh + câu hỏi → nhận câu trả lời
-  GET  /         - Web UI
-  GET  /health   - Health check
+  POST /api/upload  - Upload ảnh → nhận session_id + chart_type
+  POST /api/chat    - Chat với session_id (không cần upload lại)
+  POST /api/ask     - Single-turn (backward compat)
+  DELETE /api/session/{id} - Xóa session
+  GET  /            - Web UI
+  GET  /health      - Health check
 """
 
 import sys
@@ -12,7 +15,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import io
 import logging
-import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,40 +22,35 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from config import settings
 from pipeline import ChartQAPipeline
 
-# ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ── Global pipeline instance ─────────────────────────────────────────────────
 pipeline: ChartQAPipeline = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load pipeline on startup, cleanup on shutdown."""
     global pipeline
-    logger.info(" Loading models, please wait...")
+    logger.info("Loading models, please wait...")
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     pipeline = ChartQAPipeline()
-    logger.info(" All models loaded. API ready.")
+    logger.info("All models loaded. API ready.")
     yield
-    logger.info(" Shutting down.")
+    logger.info("Shutting down.")
 
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Chart QA API",
-    description="Chart Question Answering: YOLO -> PaddleOCR-VL -> Vintern",
-    version="1.0.0",
+    description="Chart Question Answering with multi-turn chat",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -65,106 +62,150 @@ app.add_middleware(
 )
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Helper ────────────────────────────────────────────────────────────────
+
+def _read_image(contents: bytes, content_type: str) -> Image.Image:
+    if content_type == "application/pdf":
+        try:
+            import fitz
+        except ImportError:
+            raise HTTPException(status_code=500, detail="Cần cài pymupdf: pip install pymupdf")
+        doc = fitz.open(stream=io.BytesIO(contents), filetype="pdf")
+        if len(doc) == 0:
+            raise HTTPException(status_code=400, detail="PDF không có trang nào.")
+        pix = doc[0].get_pixmap(dpi=150)
+        return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    return Image.open(io.BytesIO(contents)).convert("RGB")
+
+
+def _validate_upload(image: UploadFile, contents: bytes):
+    allowed = {"image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"}
+    if image.content_type not in allowed:
+        raise HTTPException(status_code=400,
+            detail=f"Chỉ chấp nhận JPEG/PNG/WEBP/PDF, nhận được: {image.content_type}")
+    size_mb = len(contents) / (1024 * 1024)
+    if size_mb > settings.MAX_IMAGE_SIZE_MB:
+        raise HTTPException(status_code=400,
+            detail=f"File quá lớn ({size_mb:.1f}MB), tối đa {settings.MAX_IMAGE_SIZE_MB}MB")
+
+
+# ── Routes ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
         "device": settings.DEVICE,
-        "models": {
-            "classifier": "loaded" if pipeline and pipeline.classifier.model else "fallback (unknown)",
-            "extractor": "loaded" if pipeline and pipeline.extractor.model else "error",
-            "qa": "loaded" if pipeline and pipeline.qa.model else "error",
-        },
+        "sessions": len(pipeline.list_sessions()) if pipeline else 0,
     }
 
 
-@app.post("/api/ask")
-async def ask(
-    image: UploadFile = File(..., description="Ảnh biểu đồ (PNG, JPG, JPEG)"),
-    question: str = Form(..., description="Câu hỏi về biểu đồ"),
+@app.post("/api/upload")
+async def upload(
+    image: UploadFile = File(..., description="Ảnh biểu đồ (PNG, JPG, JPEG, PDF)"),
 ):
     """
-    Main endpoint: nhận ảnh biểu đồ + câu hỏi → trả về câu trả lời.
-
-    - **image**: file ảnh biểu đồ
-    - **question**: câu hỏi bất kỳ về biểu đồ (tiếng Việt hoặc tiếng Anh)
+    Upload ảnh biểu đồ → classify + extract → trả về session_id.
+    Dùng session_id này để chat nhiều lượt mà không cần upload lại.
     """
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline chưa sẵn sàng, thử lại sau.")
+        raise HTTPException(status_code=503, detail="Pipeline chưa sẵn sàng.")
 
-    # Validate file type
-    allowed_types = {"image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"}
-    if image.content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Chỉ chấp nhận ảnh JPEG/PNG/WEBP hoặc PDF, nhận được: {image.content_type}",
-        )
-
-    # Validate file size
     contents = await image.read()
-    size_mb = len(contents) / (1024 * 1024)
-    if size_mb > settings.MAX_IMAGE_SIZE_MB:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File quá lớn ({size_mb:.1f}MB), tối đa {settings.MAX_IMAGE_SIZE_MB}MB",
-        )
+    _validate_upload(image, contents)
 
-    # Load image
     try:
-        if image.content_type == "application/pdf":
-            try:
-                import fitz
-            except ImportError:
-                raise HTTPException(status_code=500, detail="Cần cài pymupdf: pip install pymupdf")
-            doc = fitz.open(stream=io.BytesIO(contents), filetype="pdf")
-            if len(doc) == 0:
-                raise HTTPException(status_code=400, detail="PDF không có trang nào.")
-            page = doc[0]
-            pix = page.get_pixmap(dpi=150)
-            pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            logger.info(f"PDF converted to image size: {pil_image.size}")
-        else:
-            pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
+        pil_image = _read_image(contents, image.content_type)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể đọc file: {e}")
 
-    # Save upload (optional, for logging)
-    upload_name = f"{uuid.uuid4().hex}_{image.filename}"
-    upload_path = Path(settings.UPLOAD_DIR) / upload_name
-    upload_path.write_bytes(contents)
+    result = pipeline.upload_image(pil_image)
 
-    # Run pipeline
+    return JSONResponse(content={
+        "session_id"    : result.session_id,
+        "chart_type"    : result.chart_type,
+        "extracted_data": result.extracted_data,
+        "supported"     : result.supported,
+        "latency"       : result.latency,
+        "message"       : result.answer if not result.supported else
+                          f"Ảnh đã được phân tích. Loại biểu đồ: {result.chart_type}. Hãy đặt câu hỏi!",
+    })
+
+
+@app.post("/api/chat")
+async def chat(
+    session_id: str = Form(..., description="Session ID từ /api/upload"),
+    question  : str = Form(..., description="Câu hỏi về biểu đồ"),
+):
+    """
+    Chat với biểu đồ đã upload. Vintern nhớ history các lượt trước.
+    """
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline chưa sẵn sàng.")
+
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
+
+    result = pipeline.chat(session_id=session_id, question=question)
+
+    return JSONResponse(content={
+        "session_id"    : session_id,
+        "question"      : question,
+        "answer"        : result.answer,
+        "chart_type"    : result.chart_type,
+        "supported"     : result.supported,
+        "latency"       : result.latency,
+    })
+
+
+@app.delete("/api/session/{session_id}")
+async def delete_session(session_id: str):
+    """Xóa session để giải phóng bộ nhớ."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline chưa sẵn sàng.")
+    pipeline.delete_session(session_id)
+    return {"message": f"Session {session_id} đã được xóa."}
+
+
+@app.post("/api/ask")
+async def ask(
+    image   : UploadFile = File(...),
+    question: str = Form(...),
+):
+    """Single-turn (backward compat với UI cũ)."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline chưa sẵn sàng.")
+
+    contents = await image.read()
+    _validate_upload(image, contents)
+
     try:
-        result = pipeline.run(image=pil_image, question=question)
+        pil_image = _read_image(contents, image.content_type)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Pipeline error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {e}")
+        raise HTTPException(status_code=400, detail=f"Không thể đọc file: {e}")
 
-    return JSONResponse(
-        content={
-            "question": question,
-            "answer": result.answer,
-            "chart_type": result.chart_type,
-            "extracted_data": result.extracted_data,
-            "latency": result.latency,
-            "supported": result.supported,
-        }
-    )
+    result = pipeline.run(image=pil_image, question=question)
+
+    return JSONResponse(content={
+        "question"      : question,
+        "answer"        : result.answer,
+        "chart_type"    : result.chart_type,
+        "extracted_data": result.extracted_data,
+        "latency"       : result.latency,
+        "supported"     : result.supported,
+    })
 
 
 @app.get("/", response_class=HTMLResponse)
 async def ui():
-    """Serve the web UI."""
-    # Thử nhiều path khác nhau
-    possible_paths = [
+    for html_path in [
         Path(__file__).parent / "static" / "index.html",
         Path(__file__).parent / "index.html",
-    ]
-    for html_path in possible_paths:
+    ]:
         if html_path.exists():
             return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Chart QA API</h1><p>Go to <a href='/docs'>/docs</a></p>")
+    return HTMLResponse(content="<h1>Chart QA API v2</h1><p><a href='/docs'>/docs</a></p>")
