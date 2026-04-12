@@ -179,7 +179,7 @@ Swagger UI để test API trực tiếp trên browser.
 Chỉnh trong `config.py`:
 
 ```python
-YOLO_MODEL_PATH   = "Yolo_other/best.pt"
+Resnet_MODEL_PATH   = "Resnet18/best.pt"
 PADDLE_MODEL_PATH = "./models_local/paddleocr_vl"
 VINTERN_MODEL_PATH = "./models_local/vintern"
 DEVICE = "cuda"
