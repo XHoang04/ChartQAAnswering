@@ -107,11 +107,21 @@ class ChartQAPipeline:
                 session_id="",
             )
 
-        # Step 2: Extract
+       # Step 2: Extract
         t = time.time()
         extracted_data = self.extractor.extract(image)
         latency["extract"] = round(time.time() - t, 2)
         logger.info(f"[2/2] Extracted {len(extracted_data)} chars ({latency['extract']}s)")
+
+        # Giải phóng VRAM Paddle ngay sau extract
+        try:
+            import httpx, gc, torch
+            httpx.post("http://localhost:8001/free", timeout=10)
+            gc.collect()
+            torch.cuda.empty_cache()
+            logger.info("Paddle VRAM freed → Vintern ready")
+        except Exception as e:
+            logger.warning(f"Could not free Paddle VRAM: {e}")
 
         # Tạo session
         session_id = uuid.uuid4().hex
@@ -152,22 +162,21 @@ class ChartQAPipeline:
         total_start = time.time()
 
         # QA với history
-        answer, new_history = self.qa.answer_with_history(
+ 
+        answer, _ = self.qa.answer_with_history(
             image=session.image,
             question=question,
             chart_type=session.chart_type,
             extracted_data=session.extracted_data,
-            history=session.history,
+            history=[], 
             max_new_tokens=settings.VINTERN_MAX_NEW_TOKENS,
         )
 
-        # Cập nhật history trong session
-        session.history = new_history
+        # XÓA HOẶC COMMENT DÒNG DƯỚI ĐÂY LẠI
+        # session.history = new_history 
 
         latency = {"qa": round(time.time() - total_start, 2),
                    "total": round(time.time() - total_start, 2)}
-        logger.info(f"[QA] Session {session_id[:8]}... done ({latency['qa']}s)")
-
         return PipelineResult(
             chart_type=session.chart_type,
             extracted_data=session.extracted_data,
@@ -176,7 +185,6 @@ class ChartQAPipeline:
             supported=True,
             session_id=session_id,
         )
-
     # ── Backward compat: run() vẫn hoạt động ─────────────────────────────
 
     def run(self, image: Image.Image, question: str) -> PipelineResult:
