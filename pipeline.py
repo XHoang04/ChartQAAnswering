@@ -66,7 +66,7 @@ class ChartQAPipeline:
             device=settings.DEVICE,
         )
 
-        # Session storage (in-memory)
+
         self._sessions: dict[str, Session] = {}
 
         logger.info(f"Pipeline ready in {time.time() - t0:.1f}s")
@@ -145,7 +145,6 @@ class ChartQAPipeline:
             session_id=session_id,
         )
 
-    # ── Chat: multi-turn với session ──────────────────────────────────────
 
     def chat(self, session_id: str, question: str) -> PipelineResult:
         session = self.get_session(session_id)
@@ -161,7 +160,7 @@ class ChartQAPipeline:
 
         total_start = time.time()
 
-        # QA với history
+
  
         answer, _ = self.qa.answer_with_history(
             image=session.image,
@@ -172,8 +171,7 @@ class ChartQAPipeline:
             max_new_tokens=settings.VINTERN_MAX_NEW_TOKENS,
         )
 
-        # XÓA HOẶC COMMENT DÒNG DƯỚI ĐÂY LẠI
-        # session.history = new_history 
+
 
         latency = {"qa": round(time.time() - total_start, 2),
                    "total": round(time.time() - total_start, 2)}
