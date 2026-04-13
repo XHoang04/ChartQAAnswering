@@ -119,13 +119,13 @@ class ChartQA:
             if context_str:
                 return (
                     f"<image>\n{context_str}\n\n"
-                    f"Câu hỏi: {question}\n"
-                    f"Hãy trả lời dựa trên biểu đồ và dữ liệu trích xuất."
+                    f"Câu hỏi: {question}\n\n"
+                    f"Lưu ý: Nếu có sự khác biệt giữa hình ảnh và dữ liệu văn bản, bạn BẮT BUỘC phải tin và sử dụng số liệu từ 'Dữ liệu trích xuất' để trả lời."
+                    f"- Nếu câu hỏi yêu cầu tìm cao nhất/thấp nhất, hãy liệt kê các số liệu ra trước rồi mới kết luận."
                 )
             else:
                 return f"<image>\nCâu hỏi: {question}"
         else:
-            # Các lượt sau không cần <image> và context nữa
             return question
 
     def answer_with_history(
@@ -137,22 +137,18 @@ class ChartQA:
         history: list = None,
         max_new_tokens: int = 512,
     ) -> tuple[str, list]:
-        """
-        Multi-turn chat với history.
-        Returns: (answer, updated_history)
-        """
+     
         if self.model is None:
-            return "Model chưa được load.", history or []
+            return "Model chưa được load.", []
 
         try:
-            is_first_turn = not history
+            # 1. ÉP BUỘC MỌI LƯỢT ĐỀU LÀ LƯỢT ĐẦU TIÊN
+            is_first_turn = True
 
-            # Chỉ encode ảnh ở lượt đầu
-            if is_first_turn:
-                pixel_values = preprocess_image(image, max_num=6).to(torch.bfloat16).cuda()
-            else:
-                pixel_values = None
+            # 2. LUÔN LUÔN ENCODE LẠI ẢNH 
+            pixel_values = preprocess_image(image, max_num=6).to(torch.bfloat16).cuda()
 
+            # 3. LUÔN LUÔN NẠP PROMPT CÓ CHỨA DỮ LIỆU CỦA PADDLEVL
             prompt = self._build_prompt(question, chart_type, extracted_data, is_first_turn)
 
             generation_config = dict(
@@ -162,19 +158,23 @@ class ChartQA:
                 repetition_penalty=2.5,
             )
 
-            response, new_history = self.model.chat(
+            # 4. GỌI MODEL VỚI HISTORY 
+            response, _ = self.model.chat(
                 self.tokenizer,
                 pixel_values,
                 prompt,
                 generation_config,
-                history=history or None,
+                history=None,
                 return_history=True,
             )
-            return response.strip(), new_history
+            
+            # 5. LUÔN TRẢ VỀ MẢNG RỖNG CHỨ KHÔNG TRẢ HISTORY MỚI
+            return response.strip(), []
 
         except Exception as e:
             logger.error(f"Vintern inference error: {e}")
-            return f"[Lỗi: {e}]", history or []
+            return f"[Lỗi: {e}]", []
+
 
     def answer(self, image: Image.Image, question: str,
                chart_type: str = "unknown", extracted_data: str = "",

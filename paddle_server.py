@@ -36,6 +36,10 @@ def health():
 
 @app.post("/extract")
 async def extract(image: UploadFile = File(...)):
+    # 1. BẮT BUỘC THÊM DÒNG NÀY: Kéo model từ CPU về lại GPU để làm việc
+    global model
+    model.to(device)
+
     img = Image.open(io.BytesIO(await image.read())).convert("RGB")
 
     messages = [{
@@ -46,16 +50,18 @@ async def extract(image: UploadFile = File(...)):
         ]
     }]
 
+    
     inputs = processor.apply_chat_template(
         messages,
         add_generation_prompt=True,
         tokenize=True,
         return_dict=True,
         return_tensors="pt",
-        images_kwargs={"size": {"shortest_edge": 560, "longest_edge": 1024 * 28 * 28}},
+        images_kwargs={"size": {"shortest_edge": 560, "longest_edge": 1024 * 28 * 28}}, 
     ).to(device)
 
     with torch.no_grad():
+        # 3. Đã giảm token xuống 256
         outputs = model.generate(**inputs, max_new_tokens=512)
 
     result = processor.decode(
@@ -64,3 +70,14 @@ async def extract(image: UploadFile = File(...)):
     )
     print(f"Extracted: {result}") 
     return {"extracted_data": result.strip()}
+
+
+@app.post("/free")
+def free_vram():
+    global model
+    import gc
+    model.cpu() # Đẩy model về CPU để nhường VRAM
+    gc.collect()
+    torch.cuda.empty_cache() # Dọn dẹp rác trên GPU
+    print("Paddle VRAM freed") 
+    return {"status": "freed"}
