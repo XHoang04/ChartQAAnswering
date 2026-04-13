@@ -11,7 +11,7 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 app = FastAPI()
 
 import sys
-sys.path.append("./files")  # path tới thư mục chứa config.py
+sys.path.append("./files")  
 from config import Settings
 
 settings = Settings()
@@ -61,7 +61,6 @@ async def extract(image: UploadFile = File(...)):
     ).to(device)
 
     with torch.no_grad():
-        # 3. Đã giảm token xuống 256
         outputs = model.generate(**inputs, max_new_tokens=512)
 
     result = processor.decode(
@@ -76,8 +75,8 @@ async def extract(image: UploadFile = File(...)):
 def free_vram():
     global model
     import gc
-    model.cpu() # Đẩy model về CPU để nhường VRAM
+    model.cpu() 
     gc.collect()
-    torch.cuda.empty_cache() # Dọn dẹp rác trên GPU
+    torch.cuda.empty_cache() 
     print("Paddle VRAM freed") 
     return {"status": "freed"}
