@@ -120,8 +120,8 @@ class ChartQA:
                 return (
                     f"<image>\n{context_str}\n\n"
                     f"Câu hỏi: {question}\n\n"
-                    f"Lưu ý: Nếu có sự khác biệt giữa hình ảnh và dữ liệu văn bản, bạn BẮT BUỘC phải tin và sử dụng số liệu từ 'Dữ liệu trích xuất' để trả lời."
-                    f"- Nếu câu hỏi yêu cầu tìm cao nhất/thấp nhất, hãy liệt kê các số liệu ra trước rồi mới kết luận."
+                    f"Dựa vào bảng trích xuất và trả lời câu hỏi."
+               
                 )
             else:
                 return f"<image>\nCâu hỏi: {question}"
